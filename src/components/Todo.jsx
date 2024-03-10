@@ -5,52 +5,40 @@ import {
   AiTwotoneEdit,
   AiOutlineCheckCircle,
 } from "react-icons/ai";
-import { FaTimes } from "react-icons/fa";
 import { IoIosCloseCircle } from "react-icons/io";
 import Layer from "./Layer";
 
-const Todo = ({ todoList, setTodoList, setEditTodo }) => {
+const Todo = ({ todoList, deleteTodo, toggleCompleted, setEditTodo }) => {
   const [showText, setShowText] = useState(false);
   const [showFullText, setShowFullText] = useState("");
 
-  // sort data
-  const sortedTodo = todoList.sort(
-    (a, b) => new Date(b.time) - new Date(a.time)
-  );
-
-  const deleteTodo = (id) => {
-    setTodoList(todoList.filter((todo) => todo.id !== id));
+  const handleDeleteTodo = (id) => {
+    deleteTodo(id);
   };
 
-  const completed = (id) => {
-    setTodoList(
-      todoList.map((todo) => {
-        if (todo.id === id) {
-          return { ...todo, completed: !todo.completed };
-        }
-        return todo;
-      })
-    );
+  const handleToggleCompleted = (id, completed) => {
+    toggleCompleted(id, completed);
   };
 
-  // edit todo
+  // Adjusting editTodoList to directly use setEditTodo passed from Todos.jsx
   const editTodoList = (id) => {
-    const newTodo = todoList.find((todo) => todo.id === id);
-    setEditTodo(newTodo);
+    const findTodo = todoList.find((todo) => todo.id === id);
+    setEditTodo(findTodo);
   };
 
-  const fullText = (id) => {
-    const todoText = todoList.find((todo) => todo.id === id);
-    setShowFullText(todoText.text);
+  const showFullTextHandler = (id) => {
+    const findTodo = todoList.find((todo) => todo.id === id);
+    setShowFullText(findTodo.text);
     setShowText(true);
   };
 
   return (
     <div id="todos">
-      {sortedTodo.map((todo, i) => (
-        <div key={i} className="bg-todo p-2 rounded-md w-full h-full">
-          <span className="text-xs text-slate-400">
-            {moment(todo.time).fromNow()}
+      {todoList.map((todo) => (
+        <div key={todo.id} className="bg-todo p-2 rounded-md w-full h-full">
+          <span className="text-xs text-slate-600">
+            {moment(todo.time.toDate()).fromNow()}{" "}
+            {/* Adjusted for Firestore timestamp */}
           </span>
 
           <div className="flex flex-col justify-between h-[80%]">
@@ -59,10 +47,10 @@ const Todo = ({ todoList, setTodoList, setEditTodo }) => {
                 todo.completed ? "line-through text-[#40513B]" : ""
               }`}
             >
-              {todo.text.substring(0, 36)}
+              {todo.text.length > 36 ? todo.text.substring(0, 36) : todo.text}
               {todo.text.length > 36 && (
                 <button
-                  onClick={() => fullText(todo.id)}
+                  onClick={() => showFullTextHandler(todo.id)}
                   className="text-blue-600 text-xs hover:text-blue-800"
                 >
                   ...more
@@ -72,7 +60,7 @@ const Todo = ({ todoList, setTodoList, setEditTodo }) => {
 
             <div className="flex items-center justify-end gap-1 py-2">
               <span
-                onClick={() => deleteTodo(todo.id)}
+                onClick={() => handleDeleteTodo(todo.id)}
                 className="cursor-pointer hover:text-slate-500"
               >
                 <AiTwotoneDelete />
@@ -84,7 +72,7 @@ const Todo = ({ todoList, setTodoList, setEditTodo }) => {
                 <AiTwotoneEdit />
               </span>
               <span
-                onClick={() => completed(todo.id)}
+                onClick={() => handleToggleCompleted(todo.id, todo.completed)}
                 className="cursor-pointer hover:text-slate-500"
               >
                 <AiOutlineCheckCircle />

@@ -1,70 +1,151 @@
 import React, { useEffect, useState } from "react";
+import { db } from "../firebase";
+import {
+  collection,
+  query,
+  where,
+  onSnapshot,
+  addDoc,
+  doc,
+  updateDoc,
+  deleteDoc,
+  getDoc,
+} from "firebase/firestore";
+import { getAuth, onAuthStateChanged, signOut } from "firebase/auth";
+import { useNavigate } from "react-router-dom";
 import { BsEmojiSmile } from "react-icons/bs";
 import { AiOutlinePlus } from "react-icons/ai";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
 import Todo from "./Todo";
 
+const EditTodoModal = ({ isOpen, onClose, onSave, todo }) => {
+  const [newText, setNewText] = useState(todo.text);
+
+  useEffect(() => {
+    setNewText(todo.text); // Update the text when todo changes
+  }, [todo]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center p-4">
+      <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+        <h2 className="text-lg font-semibold mb-4">Edit Todo</h2>
+        <textarea
+          className="w-full border rounded p-2 mb-4"
+          value={newText}
+          onChange={(e) => setNewText(e.target.value)}
+        />
+        <div className="flex justify-end gap-2">
+          <button
+            className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          <button
+            className="bg-yellow-200 hover:bg-yellow-300 text-black font-bold py-2 px-4 rounded"
+            onClick={() => {
+              onSave(todo.id, newText);
+              onClose();
+            }}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const Todos = () => {
+  const navigate = useNavigate();
+  const auth = getAuth();
+  const [username, setUsername] = useState("");
   const [showEmoji, setShowEmoji] = useState(false);
   const [text, setText] = useState("");
-  const [todoList, setTodoList] = useState(
-    JSON.parse(localStorage.getItem("todo")) || []
-  );
-  const [editTodo, setEditTodo] = useState(null);
-  const [filter, setFilter] = useState("all"); // State for filter selection
-
-  // add emoji
-  const addEmoji = (e) => {
-    const sym = e.unified.split("_");
-    const codeArray = [];
-    sym.forEach((el) => codeArray.push("0x" + el));
-    let emoji = String.fromCodePoint(...codeArray);
-    setText(text + emoji);
-  };
+  const [todoList, setTodoList] = useState([]);
+  const [filter, setFilter] = useState("all");
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [currentEditTodo, setCurrentEditTodo] = useState({
+    id: null,
+    text: "",
+  });
 
   useEffect(() => {
-    localStorage.setItem("todo", JSON.stringify(todoList));
-  }, [todoList]);
-
-  // edit todos
-  const updateTodo = (text, id, completed) => {
-    const newTodo = todoList.map((todo) => {
-      return todo.id === id ? { text, id, completed, time: new Date() } : todo;
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUsername(user.displayName || "User");
+        const q = query(
+          collection(db, "todos"),
+          where("userId", "==", user.uid)
+        );
+        onSnapshot(q, (snapshot) => {
+          const todos = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          }));
+          setTodoList(todos);
+        });
+      } else {
+        navigate("/signin");
+      }
     });
-    setTodoList(newTodo);
-    setEditTodo(null);
-    setText("");
-    setShowEmoji(false);
+
+    return () => unsubscribe();
+  }, [navigate]);
+
+  const handleSignOut = () => {
+    signOut(auth)
+      .then(() => {
+        navigate("/signin");
+      })
+      .catch((error) => {
+        console.error("Sign out error:", error);
+      });
   };
 
-  useEffect(() => {
-    if (editTodo) {
-      setText(editTodo.text);
-    } else {
-      setText("");
-    }
-  }, [editTodo]);
-
-  const addTodo = (e) => {
+  const addTodo = async (e) => {
     e.preventDefault();
-    if (!editTodo) {
-      const id = Math.random(Math.round() * 10000000);
-      const todo = {
-        id,
+    if (!text.trim()) return; // Prevent adding empty todos
+    try {
+      await addDoc(collection(db, "todos"), {
         text,
-        time: new Date(),
         completed: false,
-      };
-      setTodoList([...todoList, todo]);
-      setText("");
-      setShowEmoji(false);
-    } else {
-      updateTodo(text, editTodo.id, editTodo.completed);
+        time: new Date(),
+        userId: auth.currentUser.uid,
+      });
+      setText(""); // Clear the input after adding
+      setShowEmoji(false); // Optionally hide the emoji picker
+    } catch (err) {
+      console.error("Error adding todo: ", err);
     }
   };
 
-  // Function to filter todos based on the filter selection
+  const deleteTodoFromFirestore = async (id) => {
+    await deleteDoc(doc(db, "todos", id));
+  };
+
+  const toggleCompletedInFirestore = async (id) => {
+    const todoRef = doc(db, "todos", id);
+    const todoSnap = await getDoc(todoRef);
+    if (todoSnap.exists()) {
+      await updateDoc(todoRef, { completed: !todoSnap.data().completed });
+    }
+  };
+
+  const editTodo = (todo) => {
+    setCurrentEditTodo({ id: todo.id, text: todo.text });
+    setIsEditModalOpen(true);
+  };
+
+  const editTodoInFirestore = async (id, newText) => {
+    if (!newText.trim()) return;
+    await updateDoc(doc(db, "todos", id), { text: newText });
+    setIsEditModalOpen(false);
+  };
+
   const filterTodos = () => {
     switch (filter) {
       case "ongoing":
@@ -77,97 +158,130 @@ const Todos = () => {
   };
 
   return (
-    <div className="pt-3rem w-[90%] sm:w-[70%] md:w-[60%] lg:w-[40%] mx-auto">
-      <h1 className="text-2 font-medium text-center capitalize text-[#40513b]">ToDo List</h1>
+    <>
+      <div className="pt-3rem w-[90%] sm:w-[70%] md:w-[60%] lg:w-[40%] mx-auto">
+        <h1 className="text-2xl font-medium text-center text-[#40513b]">
+          {username}'s ToDo List
+        </h1>
 
-      {/* Filter buttons */}
-      <div className="flex justify-center gap-4 pt-2">
-        <button
-          className={`px-4 py-2 rounded-md text-sm focus:outline-none ${
-            filter === "all"
-              ? "bg-yellow-200 text-black"
-              : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-          }`}
-          onClick={() => setFilter("all")}
-        >
-          All
-        </button>
-        <button
-          className={`px-4 py-2 rounded-md text-sm focus:outline-none ${
-            filter === "ongoing"
-              ? "bg-yellow-200 text-black"
-              : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-          }`}
-          onClick={() => setFilter("ongoing")}
-        >
-          Ongoing
-        </button>
-        <button
-          className={`px-4 py-2 rounded-md text-sm focus:outline-none ${
-            filter === "completed"
-              ? "bg-yellow-200 text-black"
-              : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-          }`}
-          onClick={() => setFilter("completed")}
-        >
-          Completed
-        </button>
-      </div>
-
-      {/* todo input  */}
-      <div>
-        <form onSubmit={addTodo} className="flex items-start gap-2 pt-2rem">
-          <div className="w-full flex items-end p-2 bg-todo rounded relative">
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="write your text"
-              className="w-full bg-transparent outline-none resize-none text-sm"
-              cols="30"
-              rows="1"
-            ></textarea>
-
-            <span
-              onClick={() => setShowEmoji(!showEmoji)}
-              className="cursor-pointer hover:text-slate-300"
-            >
-              <BsEmojiSmile />
-            </span>
-
-            {showEmoji && (
-              <div className="absolute top-[100%] right-2">
-                <Picker
-                  data={data}
-                  emojiSize={20}
-                  emojiButtonSize={28}
-                  onEmojiSelect={addEmoji}
-                  maxFrequentRows={0}
-                />
-              </div>
-            )}
-          </div>
-
+        {/* Filter buttons */}
+        <div className="flex justify-center gap-4 pt-2">
           <button
-            className="flex items-center capitalize gap-2 bg-yellow-200 text-black py-1.5
-          px-3 rounded-sm hover:bg-yellow-100
-          "
+            className={`px-4 py-2 rounded-md text-sm focus:outline-none ${
+              filter === "all"
+                ? "bg-yellow-200 text-black"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+            }`}
+            onClick={() => setFilter("all")}
           >
-            <AiOutlinePlus />
-            {editTodo ? "update" : "add"}
+            All
           </button>
-        </form>
+          <button
+            className={`px-4 py-2 rounded-md text-sm focus:outline-none ${
+              filter === "ongoing"
+                ? "bg-yellow-200 text-black"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+            }`}
+            onClick={() => setFilter("ongoing")}
+          >
+            Ongoing
+          </button>
+          <button
+            className={`px-4 py-2 rounded-md text-sm focus:outline-none ${
+              filter === "completed"
+                ? "bg-yellow-200 text-black"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+            }`}
+            onClick={() => setFilter("completed")}
+          >
+            Completed
+          </button>
+        </div>
 
-        {/* print the todo lists  */}
-        <div className="pt-2rem">
-          {/* Pass filtered todos to Todo component */}
-          <Todo
-            todoList={filterTodos()}
-            setTodoList={setTodoList}
-            setEditTodo={setEditTodo}
-          />
+        {/* todo input  */}
+        <div>
+          <form onSubmit={addTodo} className="flex items-start gap-2 pt-2rem">
+            <div className="w-full flex items-end p-2 bg-todo rounded relative">
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="write your text"
+                className="w-full bg-transparent outline-none resize-none text-sm placeholder-gray-700"
+                cols="30"
+                rows="1"
+              ></textarea>
+
+              <span
+                onClick={() => setShowEmoji(!showEmoji)}
+                className="cursor-pointer hover:text-slate-300"
+              >
+                <BsEmojiSmile />
+              </span>
+
+              {showEmoji && (
+                <div className="absolute top-[100%] right-2">
+                  <Picker
+                    data={data}
+                    emojiSize={20}
+                    emojiButtonSize={28}
+                    onEmojiSelect={addEmoji}
+                    maxFrequentRows={0}
+                  />
+                </div>
+              )}
+            </div>
+
+            <button
+              className="flex items-center capitalize gap-2 bg-yellow-200 hover:bg-yellow-300 text-black py-1.5
+          px-3 rounded-sm
+          "
+            >
+              <AiOutlinePlus />
+              add
+            </button>
+          </form>
+
+          {/* print the todo lists  */}
+          <div className="pt-2rem">
+            {/* Pass filtered todos to Todo component */}
+            <Todo
+              todoList={filterTodos()}
+              deleteTodo={deleteTodoFromFirestore}
+              toggleCompleted={toggleCompletedInFirestore}
+              setEditTodo={editTodo}
+            />
+          </div>
+        </div>
+
+        {/* sign out button */}
+        <div className="w-full flex items-center justify-center mt-5">
+          <button
+            type="button"
+            onClick={handleSignOut}
+            className="flex items-center focus:outline-none text-white bg-red-700 hover:bg-red-800 focus:ring-4 focus:ring-red-300 font-medium rounded-lg text-sm px-5 py-2.5"
+          >
+            Sign out
+          </button>
         </div>
       </div>
-    </div>
+
+      <footer className="text-center lg:text-left">
+        <div className="p-4 text-center text-surface dark:text-black">
+          © 2024 Copyright:&nbsp;
+          <a href="https://lennoaubert.blog/" className="underline">
+            Lenno Aubert Hartono
+          </a>
+          &nbsp;-&nbsp;2602116983
+        </div>
+      </footer>
+
+      <EditTodoModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        onSave={editTodoInFirestore}
+        todo={currentEditTodo}
+      />
+    </>
   );
 };
 

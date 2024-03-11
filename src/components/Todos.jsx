@@ -11,13 +11,125 @@ import {
   deleteDoc,
   getDoc,
 } from "firebase/firestore";
-import { getAuth, onAuthStateChanged, signOut } from "firebase/auth";
+import {
+  getAuth,
+  onAuthStateChanged,
+  signOut,
+  updateProfile,
+  updatePassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider,
+} from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import { BsEmojiSmile } from "react-icons/bs";
 import { AiOutlinePlus } from "react-icons/ai";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
 import Todo from "./Todo";
+
+const EditProfileModal = ({ isOpen, onClose, onUpdateProfile }) => {
+  const [newUsername, setNewUsername] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [confirmPasswordError, setConfirmPasswordError] = useState("");
+
+  useEffect(() => {
+    setPasswordError("");
+    setConfirmPasswordError("");
+  }, [isOpen, currentPassword, newPassword, confirmNewPassword]);
+
+  const handleSubmit = () => {
+    setPasswordError("");
+    setConfirmPasswordError("");
+
+    if (newPassword !== confirmNewPassword) {
+      setConfirmPasswordError(
+        "New password and confirm new password must match."
+      );
+      return;
+    }
+
+    onUpdateProfile(
+      newUsername,
+      currentPassword,
+      newPassword,
+      confirmNewPassword,
+      setPasswordError, // Pass error setters as additional arguments
+      setConfirmPasswordError
+    );
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center p-4"
+      style={{ zIndex: 1000 }}
+    >
+      <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+        <h2 className="text-xl font-semibold mb-4">Edit Profile</h2>
+        <hr className="my-4" />
+        <div className="my-4">
+          <h3 className="text-sm font-semibold mb-2">Edit Username</h3>
+          <input
+            className="w-full border rounded p-2"
+            placeholder="New Username"
+            value={newUsername}
+            onChange={(e) => setNewUsername(e.target.value)}
+          />
+        </div>
+
+        <div className="my-2">
+          <h3 className="text-sm font-semibold mb-2">Edit Password</h3>
+          <input
+            type="password"
+            className="w-full border rounded p-2 mb-1"
+            placeholder="Current Password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+          />
+          {passwordError && (
+            <p className="text-red-500 text-xs">{passwordError}</p>
+          )}
+          <input
+            type="password"
+            className="w-full border rounded p-2 mb-1"
+            placeholder="New Password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+          />
+          <input
+            type="password"
+            className="w-full border rounded p-2 mb-1"
+            placeholder="Confirm New Password"
+            value={confirmNewPassword}
+            onChange={(e) => setConfirmNewPassword(e.target.value)}
+          />
+          {confirmPasswordError && (
+            <p className="text-red-500 text-xs">{confirmPasswordError}</p>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <button
+            className="bg-gray-300 hover:bg-gray-400 text-gray-800 text-base font-semibold py-1.5 px-4 rounded"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          <button
+            className="bg-yellow-200 hover:bg-yellow-300 text-gray-800 text-base font-semibold py-1.5 px-4 rounded"
+            onClick={() => handleSubmit()}
+          >
+            Update
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const EditTodoModal = ({ isOpen, onClose, onSave, todo }) => {
   const [newText, setNewText] = useState(todo.text);
@@ -72,6 +184,7 @@ const Todos = () => {
     id: null,
     text: "",
   });
+  const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -157,12 +270,80 @@ const Todos = () => {
     }
   };
 
+  const handleUpdateProfile = async (
+    newUsername,
+    currentPassword,
+    newPassword,
+    confirmNewPassword,
+    setPasswordError, // Accept error setters as parameters
+    setConfirmPasswordError
+  ) => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    setPasswordError("");
+    setConfirmPasswordError("");
+
+    try {
+      if (
+        newPassword &&
+        newPassword === confirmNewPassword &&
+        currentPassword
+      ) {
+        const credential = EmailAuthProvider.credential(
+          user.email,
+          currentPassword
+        );
+        await reauthenticateWithCredential(user, credential).catch((error) => {
+          if (error.code === "auth/wrong-password") {
+            setPasswordError(
+              "The current password is incorrect. Please try again."
+            );
+          } else {
+            setPasswordError(
+              "The current password is incorrect. Please try again."
+            );
+          }
+          throw new Error("Re-authentication failed."); // Prevent further execution on catch
+        });
+
+        await updatePassword(user, newPassword);
+      }
+
+      if (newUsername && user.displayName !== newUsername) {
+        await updateProfile(user, { displayName: newUsername });
+        setUsername(newUsername);
+      }
+
+      setIsEditProfileModalOpen(false);
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      // Additional error handling can be implemented here
+    }
+  };
+
   return (
     <>
       <div className="pt-3rem w-[90%] sm:w-[70%] md:w-[60%] lg:w-[40%] mx-auto">
         <h1 className="text-2xl font-medium text-center text-[#40513b]">
           {username}'s ToDo List
         </h1>
+
+        {/* Edit Profile button */}
+        <div className="flex justify-center">
+          <button
+            onClick={() => setIsEditProfileModalOpen(true)}
+            className="inline-flex items-center justify-center px-6 py-1 my-3 font-medium leading-6 text-white text-sm whitespace-no-wrap bg-[#609966] rounded-md shadow-sm hover:bg-[#56895C] focus:outline-none focus:ring-2 focus:ring-offset-2"
+          >
+            Edit Profile
+          </button>
+
+          <EditProfileModal
+            isOpen={isEditProfileModalOpen}
+            onClose={() => setIsEditProfileModalOpen(false)}
+            onUpdateProfile={handleUpdateProfile}
+          />
+        </div>
 
         {/* Filter buttons */}
         <div className="flex justify-center gap-4 pt-2">
